@@ -28,6 +28,9 @@ const dashboardHTML = `
         .modal-header, .modal-footer { border-color: #333; }
         .btn-close { filter: invert(1); }
         .config-box { background: #000; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 0.8rem; word-break: break-all; }
+        .status-badge { padding: 5px 10px; border-radius: 4px; font-weight: bold; }
+        .bg-success-custom { background-color: #198754; color: white; }
+        .bg-danger-custom { background-color: #dc3545; color: white; }
     </style>
 </head>
 <body>
@@ -86,13 +89,37 @@ const dashboardHTML = `
                 <button class="btn btn-sm btn-outline-warning" onclick="generateRandomUUID()"><i class="fas fa-random me-1"></i> New UUID</button>
             </div>
             <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">Host / Domain</label>
-                    <input type="text" id="hostInput" class="form-control" readonly>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Host / Domain</label>
+                        <input type="text" id="hostInput" class="form-control" readonly>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">UUID</label>
+                        <input type="text" id="currentUuid" class="form-control" readonly>
+                    </div>
                 </div>
+
                 <div class="mb-3">
-                    <label class="form-label">UUID</label>
-                    <input type="text" id="currentUuid" class="form-control" readonly>
+                    <label class="form-label">Proxy IP / Bug IP (Optional)</label>
+                    <div class="input-group">
+                        <input type="text" id="proxyIpInput" class="form-control" placeholder="e.g. 104.16.0.0">
+                        <button class="btn btn-primary" onclick="checkProxy()">Check</button>
+                    </div>
+                    <div id="proxyStatus" class="mt-2" style="display:none;">
+                        <div class="card p-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <span id="proxyStatusBadge" class="status-badge">Checking...</span>
+                                    <span class="ms-2"><i class="fas fa-globe me-1"></i> <span id="proxyCountry">-</span></span>
+                                    <span class="ms-2"><i class="fas fa-building me-1"></i> <span id="proxyIsp">-</span></span>
+                                </div>
+                                <div>
+                                    <i class="fas fa-tachometer-alt me-1"></i> <span id="proxyPing">-</span> ms
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <ul class="nav nav-tabs border-bottom-0 mb-3" id="myTab" role="tablist">
@@ -177,21 +204,67 @@ const dashboardHTML = `
             return regex.test(uuid);
         }
 
-        function generateLinks(uuid) {
+        async function checkProxy() {
+            const ip = document.getElementById('proxyIpInput').value.trim();
+            const statusDiv = document.getElementById('proxyStatus');
+            const badge = document.getElementById('proxyStatusBadge');
+
+            if (!ip) {
+                generateLinks(localStorage.getItem('uuid'));
+                statusDiv.style.display = 'none';
+                return;
+            }
+
+            statusDiv.style.display = 'block';
+            badge.className = 'status-badge bg-warning text-dark';
+            badge.innerText = 'Checking...';
+            document.getElementById('proxyPing').innerText = '-';
+            document.getElementById('proxyCountry').innerText = '-';
+            document.getElementById('proxyIsp').innerText = '-';
+
+            try {
+                const response = await fetch('/api/proxyCheck?ip=' + ip);
+                const data = await response.json();
+
+                if (data.status === 'active') {
+                    badge.className = 'status-badge bg-success-custom';
+                    badge.innerText = 'Active';
+                    document.getElementById('proxyPing').innerText = data.ping;
+                    document.getElementById('proxyCountry').innerText = data.country || 'Unknown';
+                    document.getElementById('proxyIsp').innerText = data.isp || 'Unknown';
+
+                    // Regenerate links with active proxy
+                    generateLinks(localStorage.getItem('uuid'), ip);
+                } else {
+                    badge.className = 'status-badge bg-danger-custom';
+                    badge.innerText = 'Offline';
+                    // Revert to normal links if offline? Or keep it? keeping normal for now
+                    generateLinks(localStorage.getItem('uuid'));
+                }
+            } catch (e) {
+                badge.className = 'status-badge bg-danger-custom';
+                badge.innerText = 'Error';
+                console.error(e);
+            }
+        }
+
+        function generateLinks(uuid, proxyIp = '') {
             const host = currentHost;
+            const address = proxyIp ? proxyIp : host;
+
             // VLESS TLS
-            const vlessTls = \`vless://\${uuid}@\${host}:443?encryption=none&security=tls&sni=\${host}&fp=randomized&type=ws&host=\${host}&path=%2F#DASBOR-\${host}\`;
+            const vlessTls = \`vless://\${uuid}@\${address}:443?encryption=none&security=tls&sni=\${host}&fp=randomized&type=ws&host=\${host}&path=%2F#DASBOR-\${host}\`;
             document.getElementById('vlessLink').value = vlessTls;
 
             // VLESS Non-TLS
-            const vlessNonTls = \`vless://\${uuid}@\${host}:80?encryption=none&security=none&sni=\${host}&fp=randomized&type=ws&host=\${host}&path=%2F#DASBOR-\${host}-NTLS\`;
+            const vlessNonTls = \`vless://\${uuid}@\${address}:80?encryption=none&security=none&sni=\${host}&fp=randomized&type=ws&host=\${host}&path=%2F#DASBOR-\${host}-NTLS\`;
             document.getElementById('vlessLinkNonTls').value = vlessNonTls;
 
             // Clash
             const clashConfig = \`
 - type: vless
   name: DASBOR-\${host}
-  server: \${host}
+  server: \${address}
   port: 443
   uuid: \${uuid}
   network: ws
@@ -242,6 +315,12 @@ export default {
                             status: 200,
                             headers: { "Content-Type": "text/html;charset=utf-8" }
                         });
+                    case '/api/proxyCheck':
+                        const ip = url.searchParams.get('ip');
+                        if (ip) {
+                            return await checkProxyIP(ip);
+                        }
+                        return new Response(JSON.stringify({ status: 'error', message: 'No IP provided' }), { status: 400 });
                     case `/sub/${userID}`: {
                         const vlessConfig = getVLESSConfig(userID, request.headers.get('Host'));
                         return new Response(`${vlessConfig}`, {
@@ -252,7 +331,7 @@ export default {
                         });
                     }
                     default:
-                        // Fallback to dashboard for 404s to keep UI accessible or return 404
+                        // Fallback to dashboard for 404s
                         return new Response(dashboardHTML, {
                             status: 200,
                             headers: { "Content-Type": "text/html;charset=utf-8" }
@@ -267,6 +346,38 @@ export default {
         }
     },
 };
+
+/**
+ * Checks if a Proxy IP is active and returns metadata.
+ * @param {string} ip
+ */
+async function checkProxyIP(ip) {
+    try {
+        // Measure TCP connect time
+        const start = Date.now();
+        const socket = connect({ hostname: ip, port: 443 });
+        await socket.opened;
+        socket.close();
+        const ping = Date.now() - start;
+
+        // Fetch IP Metadata
+        const geoResp = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,isp,query`);
+        const geoData = await geoResp.json();
+
+        return new Response(JSON.stringify({
+            status: 'active',
+            ping: ping,
+            country: geoData.country || 'Unknown',
+            isp: geoData.isp || 'Unknown'
+        }), { headers: { "Content-Type": "application/json" } });
+
+    } catch (error) {
+        return new Response(JSON.stringify({
+            status: 'offline',
+            error: error.toString()
+        }), { headers: { "Content-Type": "application/json" } });
+    }
+}
 
 /**
  *
