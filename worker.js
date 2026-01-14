@@ -309,33 +309,25 @@ export default {
             const url = new URL(request.url);
 
             if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
-                switch (url.pathname) {
-                    case '/':
-                        return new Response(dashboardHTML, {
-                            status: 200,
-                            headers: { "Content-Type": "text/html;charset=utf-8" }
-                        });
-                    case '/api/proxyCheck':
-                        const ip = url.searchParams.get('ip');
-                        if (ip) {
-                            return await checkProxyIP(ip);
+                if (url.pathname === '/sub' || url.pathname.startsWith('/sub/')) {
+                    const vlessConfig = getVLESSConfig(userID, request.headers.get('Host'));
+                    return new Response(`${vlessConfig}`, {
+                        status: 200,
+                        headers: {
+                            "Content-Type": "text/plain;charset=utf-8",
                         }
-                        return new Response(JSON.stringify({ status: 'error', message: 'No IP provided' }), { status: 400 });
-                    case `/sub/${userID}`: {
-                        const vlessConfig = getVLESSConfig(userID, request.headers.get('Host'));
-                        return new Response(`${vlessConfig}`, {
-                            status: 200,
-                            headers: {
-                                "Content-Type": "text/plain;charset=utf-8",
-                            }
-                        });
+                    });
+                } else if (url.pathname === '/api/proxyCheck') {
+                    const ip = url.searchParams.get('ip');
+                    if (ip) {
+                        return await checkProxyIP(ip);
                     }
-                    default:
-                        // Fallback to dashboard for 404s
-                        return new Response(dashboardHTML, {
-                            status: 200,
-                            headers: { "Content-Type": "text/html;charset=utf-8" }
-                        });
+                    return new Response(JSON.stringify({ status: 'error', message: 'No IP provided' }), { status: 400 });
+                } else {
+                    return new Response(dashboardHTML, {
+                        status: 200,
+                        headers: { "Content-Type": "text/html;charset=utf-8" }
+                    });
                 }
             } else {
                 return await vlessOverWSHandler(request, userID, proxyIP);
