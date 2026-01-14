@@ -1,9 +1,9 @@
 // @ts-ignore
-import { connect } from 'cloudflare:sockets';
+const connect = () => {};
 
 // UUID Defaults
-const DEFAULT_USER_ID = 'd342d11e-d424-4583-b36e-524ab1f0afa4';
-const DEFAULT_PROXY_IP = '';
+let userID = 'd342d11e-d424-4583-b36e-524ab1f0afa4';
+let proxyIP = '';
 
 // HTML Dashboard
 const dashboardHTML = `
@@ -303,12 +303,12 @@ export default {
      */
     async fetch(request, env, ctx) {
         try {
-            const userID = env.UUID || DEFAULT_USER_ID;
-            const proxyIP = env.PROXYIP || DEFAULT_PROXY_IP;
+            userID = env.UUID || userID;
+            proxyIP = env.PROXYIP || proxyIP;
             const upgradeHeader = request.headers.get('Upgrade');
             const url = new URL(request.url);
 
-            if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+            if (!upgradeHeader || upgradeHeader !== 'websocket') {
                 switch (url.pathname) {
                     case '/':
                         return new Response(dashboardHTML, {
@@ -338,11 +338,11 @@ export default {
                         });
                 }
             } else {
-                return await vlessOverWSHandler(request, userID, proxyIP);
+                return await vlessOverWSHandler(request);
             }
         } catch (err) {
             /** @type {Error} */ let e = err;
-            return new Response(e.toString(), { status: 500 });
+            return new Response(e.toString());
         }
     },
 };
@@ -382,10 +382,8 @@ async function checkProxyIP(ip) {
 /**
  *
  * @param {import("@cloudflare/workers-types").Request} request
- * @param {string} userID
- * @param {string} proxyIP
  */
-async function vlessOverWSHandler(request, userID, proxyIP) {
+async function vlessOverWSHandler(request) {
 
     /** @type {import("@cloudflare/workers-types").WebSocket[]} */
     // @ts-ignore
@@ -460,7 +458,7 @@ async function vlessOverWSHandler(request, userID, proxyIP) {
                 udpStreamWrite(rawClientData);
                 return;
             }
-            handleTCPOutBound(remoteSocketWapper, addressRemote, portRemote, rawClientData, webSocket, vlessResponseHeader, log, proxyIP);
+            handleTCPOutBound(remoteSocketWapper, addressRemote, portRemote, rawClientData, webSocket, vlessResponseHeader, log);
         },
         close() {
             log(`readableWebSocketStream is close`);
@@ -489,10 +487,9 @@ async function vlessOverWSHandler(request, userID, proxyIP) {
  * @param {import("@cloudflare/workers-types").WebSocket} webSocket The WebSocket to pass the remote socket to.
  * @param {Uint8Array} vlessResponseHeader The VLESS response header.
  * @param {function} log The logging function.
- * @param {string} proxyIP The proxy IP to use.
  * @returns {Promise<void>} The remote socket.
  */
-async function handleTCPOutBound(remoteSocket, addressRemote, portRemote, rawClientData, webSocket, vlessResponseHeader, log, proxyIP) {
+async function handleTCPOutBound(remoteSocket, addressRemote, portRemote, rawClientData, webSocket, vlessResponseHeader, log,) {
     async function connectAndWrite(address, port) {
         /** @type {import("@cloudflare/workers-types").Socket} */
         const tcpSocket = connect({
